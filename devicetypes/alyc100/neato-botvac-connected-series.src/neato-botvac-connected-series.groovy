@@ -13,6 +13,7 @@
  *  for the specific language governing permissions and limitations under the License.
  *
  *  VERSION HISTORY
+ *  20-04-2018: 1.10 - Added Spot clean command.
  *  18-04-2018: 1.9b - Incorrect Persistent Map mode label fix.
  *  18-04-2018: 1.9 - Support for D7 persistent map cleaning and deep cleaning mode.
  *	15-04-2018: 1.8.1 - Fix support for D7 with houseCleaning basic-3 support.
@@ -72,6 +73,7 @@ metadata {
         command "toggleNavigationMode"
         command "togglePersistentMapMode"
         command "findMe"
+        command "spotClean"
 
 		attribute "network","string"
 		attribute "bin","string"
@@ -181,6 +183,12 @@ metadata {
 		main("switch")
 		details(["clean","smartScheduleStatusMessage", "forceCleanStatusMessage", "status", "battery", "charging", "bin", "dockStatus", "dockHasBeenSeen", "cleaningMode", "navigationMode", "persistentMapMode", "scheduled", "resetSmartSchedule", "network", "refresh", "mapHTML"])
 	}
+
+  preferences {
+    input "spotCleanSizeMetric", "enum", title: "Spot Clean Unit of Measurement", options: ["Feet", "Centimeters"], displayDuringSetup: true
+    input "spotCleanWidth", "number", title: "Spot Clean Width", description: "Width of spot cleaning area", displayDuringSetup: true
+    input "spotCleanHeight", "number", title: "Spot Clean Height", description: "Height of spot cleaning area", displayDuringSetup: true
+  }
 }
 
 mappings {
@@ -325,6 +333,48 @@ def togglePersistentMapMode() {
     }
     sendEvent(name: 'persistentMapMode', value: state.startPersistentMapMode, displayed: true)
     runIn(2, refresh)
+}
+
+def convertToCentimeters(distance) {
+  if(spotCleanSizeMetric == 'Feet') {
+    return (distance * 30.48).toInteger()
+  }
+  return distance
+}
+
+def spotClean() {
+  log.debug "Executing 'spotClean'"
+  def currentState = device.latestState('status').stringValue
+  if (currentState != 'error') {
+    if (currentState == 'paused') {
+      nucleoPOST("/messages", '{"reqId":"1", "cmd":"stopCleaning"}')
+    }
+    def modeParam = 1
+    if (isTurboCleanMode()) modeParam = 2
+
+    def navParam = 1
+    if (isExtraCareNavigationMode()) navParam = 2
+
+    def modifier = 1
+    def spotCleanWidthInCm = convertToCentimeters(spotCleanWidth)
+    def spotCleanHeightInCm = convertToCentimeters(spotCleanHeight)
+
+    switch (state.spotCleaning) {
+      case "basic-1":
+        nucleoPOST("/messages", '{"reqId":"1", "cmd":"startCleaning", "params":{"category": 3, "mode": ' + modeParam + ', "modifier": ' + modifier + ', "spotWidth":' + spotCleanWidthInCm + ', "spotHeight":' + spotCleanHeightInCm + '}}')
+      break;
+      case "micro-2":
+        nucleoPOST("/messages", '{"reqId":"1", "cmd":"startCleaning", "params":{"category": 3, "navigationMode": ' + navParam + '}}')
+      break;
+      case "basic-2":
+        nucleoPOST("/messages", '{"reqId":"1", "cmd":"startCleaning", "params":{"category": 3, "mode": ' + modeParam + ', "modifier": ' + modifier + ', "navigationMode": ' + navParam + ', "spotWidth":' + spotCleanWidthInCm + ', "spotHeight":' + spotCleanHeightInCm + '}}')
+      break;
+      case "minimal-2":
+        nucleoPOST("/messages", '{"reqId":"1", "cmd":"startCleaning", "params":{"category": 3, "modifier": ' + modifier + ', "navigationMode": ' + navParam + '}}')
+      break;
+    }
+  }
+  runIn(2, refresh)
 }
 
 def poll() {
